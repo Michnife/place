@@ -11,9 +11,12 @@ import (
 	"image/draw"
 	"image/png"
 	"net/http"
+	"os"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 )
 
 var upgrader = websocket.Upgrader{
@@ -43,6 +46,33 @@ type Server struct {
 	imgBuf  []byte
 }
 
+type Selection struct {
+	ID        string    `json:"id"`
+	Timestamp string    `json:"timestamp"`
+	Bounds    Bounds    `json:"bounds"`
+	Pixels    []Pixel   `json:"pixels"`
+}
+
+type Bounds struct {
+	MinX int `json:"minX"`
+	MaxX int `json:"maxX"`
+	MinY int `json:"minY"`
+	MaxY int `json:"maxY"`
+}
+
+type Pixel struct {
+	X     int        `json:"x"`
+	Y     int        `json:"y"`
+	Color PixelRGBA  `json:"color"`
+}
+
+type PixelRGBA struct {
+	R uint8 `json:"R"`
+	G uint8 `json:"G"`
+	B uint8 `json:"B"`
+	A uint8 `json:"A"`
+}
+
 func NewServer(img draw.Image, count int) *Server {
 	sv := &Server{
 		RWMutex: sync.RWMutex{},
@@ -56,21 +86,23 @@ func NewServer(img draw.Image, count int) *Server {
 }
 
 func (sv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	switch path.Base(req.URL.Path) {
-	case "place.png":
-		sv.HandleGetImage(w, req)
-	case "stat":
-		sv.HandleGetStat(w, req)
-	case "ws":
-		sv.HandleSocket(w, req)
-	default:
-		http.NotFound(w, req)
-	}
+    switch {
+    case strings.HasPrefix(req.URL.Path, "/selections"):
+        sv.handleSelections(w, req)
+    case path.Base(req.URL.Path) == "place.png":
+        sv.HandleGetImage(w, req)
+    case path.Base(req.URL.Path) == "stat":
+        sv.HandleGetStat(w, req)
+    case path.Base(req.URL.Path) == "ws":
+        sv.HandleSocket(w, req)
+    default:
+        http.NotFound(w, req)
+    }
 }
 
 func (sv *Server) HandleGetImage(w http.ResponseWriter, r *http.Request) {
 	log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Image").Trace("Image requested")
-	b := sv.GetImageBytes() //not thread safe but it won't do anything bad
+	b := sv.GetImageBytes()
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
 	w.Header().Set("Cache-Control", "no-cache, no-store")
@@ -161,7 +193,7 @@ func (sv *Server) readLoop(conn *websocket.Conn, r *http.Request, i int) {
 			break
 		}
 
-		if p == (PixelColor{}) { // p is "nil"
+		if p == (PixelColor{}) {
 			continue
 		}
 
@@ -254,4 +286,143 @@ func (sv *Server) setPixel(x, y int, c color.Color) bool {
 	sv.img.Set(x, y, c)
 	sv.imgBuf = nil
 	return true
+}
+
+func (sv *Server) handleSelections(w http.ResponseWriter, r *http.Request) {
+    log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Trace("Selection API requested")
+    w.Header().Set("Content-Type", "application/json")
+    w.Header().Set("Access-Control-Allow-Origin", "*")
+
+    switch r.Method {
+    case "GET":
+        if r.URL.Path == "/selections" {
+            sv.getAllSelections(w, r)
+        } else {
+            sv.getSelection(w, r)
+        }
+    case "POST":
+        sv.saveSelection(w, r)
+    case "DELETE":
+        if r.URL.Path == "/selections" {
+            sv.clearAllSelections(w, r)
+        } else {
+            sv.deleteSelection(w, r)
+        }
+    default:
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+    }
+}
+
+func (sv *Server) saveSelection(w http.ResponseWriter, r *http.Request) {
+    var selection Selection
+    if err := json.NewDecoder(r.Body).Decode(&selection); err != nil {
+        log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Error("Invalid JSON:", err)
+        http.Error(w, "Invalid JSON", http.StatusBadRequest)
+        return
+    }
+
+    selection.ID = "selection_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+
+    // Utiliser un système de stockage similaire aux pixels
+    selections := sv.loadSelections()
+    selections = append(selections, selection)
+
+    if err := sv.saveSelections(selections); err != nil {
+        log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Error("Erreur lors de la sauvegarde:", err)
+        http.Error(w, "Erreur lors de la sauvegarde", http.StatusInternalServerError)
+        return
+    }
+
+    log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").WithField("id", selection.ID).Info("Sélection sauvegardée")
+    json.NewEncoder(w).Encode(map[string]string{"id": selection.ID})
+}
+
+func (sv *Server) getAllSelections(w http.ResponseWriter, r *http.Request) {
+    selections := sv.loadSelections()
+    log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Debug("Returning", len(selections), "selections")
+    json.NewEncoder(w).Encode(selections)
+}
+
+func (sv *Server) getSelection(w http.ResponseWriter, r *http.Request) {
+    id := strings.TrimPrefix(r.URL.Path, "/selections/")
+    selections := sv.loadSelections()
+
+    for _, selection := range selections {
+        if selection.ID == id {
+            log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Debug("Returning selection", id)
+            json.NewEncoder(w).Encode(selection)
+            return
+        }
+    }
+
+    log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Warning("Selection not found:", id)
+    http.Error(w, "Sélection non trouvée", http.StatusNotFound)
+}
+
+func (sv *Server) deleteSelection(w http.ResponseWriter, r *http.Request) {
+    id := strings.TrimPrefix(r.URL.Path, "/selections/")
+    selections := sv.loadSelections()
+
+    for i, selection := range selections {
+        if selection.ID == id {
+            selections = append(selections[:i], selections[i+1:]...)
+            if err := sv.saveSelections(selections); err != nil {
+                log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Error("Erreur lors de la suppression:", err)
+                http.Error(w, "Erreur lors de la suppression", http.StatusInternalServerError)
+                return
+            }
+            log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").WithField("id", id).Info("Sélection supprimée")
+            w.WriteHeader(http.StatusOK)
+            return
+        }
+    }
+
+    log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Warning("Selection not found for deletion:", id)
+    http.Error(w, "Sélection non trouvée", http.StatusNotFound)
+}
+
+func (sv *Server) clearAllSelections(w http.ResponseWriter, r *http.Request) {
+    if err := sv.saveSelections([]Selection{}); err != nil {
+        log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Error("Erreur lors de la suppression:", err)
+        http.Error(w, "Erreur lors de la suppression", http.StatusInternalServerError)
+        return
+    }
+
+    log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Info("Toutes les sélections ont été supprimées")
+    w.WriteHeader(http.StatusOK)
+}
+
+// Système de stockage inspiré du stockage des pixels
+func (sv *Server) loadSelections() []Selection {
+    data, err := os.ReadFile("selections.json")
+    if err != nil {
+        if os.IsNotExist(err) {
+            log.Debug("Fichier selections.json n'existe pas, création d'une liste vide")
+            return []Selection{}
+        }
+        log.Error("Erreur lors de la lecture du fichier selections.json:", err)
+        return []Selection{}
+    }
+
+    var selections []Selection
+    if err := json.Unmarshal(data, &selections); err != nil {
+        log.Error("Erreur lors du parsing JSON du fichier selections.json:", err)
+        return []Selection{}
+    }
+
+    return selections
+}
+
+func (sv *Server) saveSelections(selections []Selection) error {
+    data, err := json.MarshalIndent(selections, "", "  ")
+    if err != nil {
+        return fmt.Errorf("erreur lors de la sérialisation JSON: %v", err)
+    }
+
+    if err := os.WriteFile("selections.json", data, 0644); err != nil {
+        return fmt.Errorf("erreur lors de l'écriture du fichier: %v", err)
+    }
+
+    log.Debug("Fichier selections.json sauvegardé avec", len(selections), "sélections")
+    return nil
 }

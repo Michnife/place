@@ -263,4 +263,11 @@ class GLWindow {
 		this.#u_zoom = this.#gl.getUniformLocation(this.#program, 'zoom');
 		this.#u_grid = this.#gl.getUniformLocation(this.#program, 'grid');
 	}
+    getTexScale() {
+        return this.#texScale;
+    }
+
+    getCamPos() {
+        return this.#camPos;
+    }
 }
