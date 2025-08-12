@@ -9,21 +9,52 @@ function main() {
     GUI(cvs, glWindow, place);
 }
 
+const preventCanvasInteraction = (element) => {
+    // Seuls les événements qui interfèrent avec le canvas doivent être stoppés
+    element.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+    });
+    element.addEventListener('mousemove', (e) => {
+        e.stopPropagation();
+    });
+    element.addEventListener('mouseup', (e) => {
+        e.stopPropagation();
+    });
+    // Ne pas bloquer wheel pour permettre le scroll dans le dropdown
+    element.addEventListener('touchstart', (e) => {
+        e.stopPropagation();
+    });
+    element.addEventListener('touchmove', (e) => {
+        e.stopPropagation();
+    });
+    element.addEventListener('touchend', (e) => {
+        e.stopPropagation();
+    });
+};
+
 const GUI = (cvs, glWindow, place) => {
     let color = new Uint8Array([0, 0, 0]);
     let dragdown = false;
     let lastMovePos = {x: 0, y: 0};
     let touchstartTime;
     
-    // Variables pour la sélection de pixels individuels
     let isSelecting = false;
-    let selectedPixels = new Set(); // Utilise un Set pour éviter les doublons
-    let selectionOverlays = []; // Array pour stocker tous les overlays de pixels sélectionnés
+    let selectedPixels = new Set();
+    let selectionOverlays = [];
     let isSelectionDragging = false;
+    let currentSelectionData = null;
 
     const colorField = document.querySelector("#color-field");
     const colorPreset = document.querySelector("#color-preset");
     const colorSwatch = document.querySelector("#color-swatch");
+
+    const modal = document.getElementById('selection-modal');
+    const modalName = document.getElementById('selection-name');
+    const modalDescription = document.getElementById('selection-description');
+    const modalCancel = document.getElementById('modal-cancel');
+    const modalSave = document.getElementById('modal-save');
+
+    const hasModal = modal && modalName && modalDescription && modalCancel && modalSave;
 
     document.addEventListener("keydown", ev => {
         switch (ev.code) {
@@ -83,7 +114,6 @@ const GUI = (cvs, glWindow, place) => {
         const pos = {x: ev.clientX, y: ev.clientY};
         
         if (isSelecting) {
-            // Mode sélection - commencer à peindre la sélection
             isSelectionDragging = true;
             selectPixelAtPosition(pos);
             return;
@@ -124,7 +154,6 @@ const GUI = (cvs, glWindow, place) => {
         const movePos = {x: ev.clientX, y: ev.clientY};
         
         if (isSelecting && isSelectionDragging) {
-            // Continuer à peindre la sélection pendant le glissement
             selectPixelAtPosition(movePos);
             return;
         }
@@ -141,7 +170,6 @@ const GUI = (cvs, glWindow, place) => {
                 glWindow.draw();
                 document.body.style.cursor = "grab";
                 
-                // Mettre à jour les overlays pendant le déplacement
                 if (isSelecting) {
                     updateAllSelectionOverlays();
                 }
@@ -171,13 +199,11 @@ const GUI = (cvs, glWindow, place) => {
         let movePos = {x: ev.touches[0].clientX, y: ev.touches[0].clientY};
         
         if (isSelecting) {
-            // En mode sélection sur mobile
             selectPixelAtPosition(movePos);
         } else {
             glWindow.move(movePos.x - lastMovePos.x, movePos.y - lastMovePos.y);
             glWindow.draw();
             
-            // Mettre à jour les overlays pendant le déplacement
             if (isSelecting) {
                 updateAllSelectionOverlays();
             }
@@ -233,10 +259,6 @@ const GUI = (cvs, glWindow, place) => {
         element.addEventListener("click", ev => setColor(ev.target.getAttribute('data-color')));
     });
 
-    // ***************************************************
-    // ***************************************************
-    // Selection Functions (mode peinture) - VERSION SIMPLIFIÉE
-    //
     const startSelection = () => {
         isSelecting = true;
         document.body.style.cursor = "crosshair";
@@ -254,10 +276,8 @@ const GUI = (cvs, glWindow, place) => {
     };
 
     const selectPixelAtPosition = (screenPos) => {
-        // Utiliser EXACTEMENT la même logique que drawPixel
         const canvasPos = glWindow.click(screenPos);
         
-        // Si glWindow.click retourne null, c'est que le clic est en dehors du canvas
         if (!canvasPos) return;
 
         const x = Math.floor(canvasPos.x);
@@ -266,15 +286,12 @@ const GUI = (cvs, glWindow, place) => {
 
         if (!selectedPixels.has(pixelKey)) {
             selectedPixels.add(pixelKey);
-            // Au lieu de créer un overlay complexe, on dessine temporairement un contour
             drawTemporaryPixelBorder(x, y);
             console.log(`Pixel sélectionné: (${x}, ${y})`);
         }
     };
 
-    // Solution simple : créer un overlay qui suit exactement les pixels
     const drawTemporaryPixelBorder = (x, y) => {
-        // Créer un petit carré qui suit exactement le pixel
         const overlay = document.createElement('div');
         overlay.className = 'pixel-selection-overlay';
         overlay.style.cssText = `
@@ -291,12 +308,10 @@ const GUI = (cvs, glWindow, place) => {
         document.body.appendChild(overlay);
         selectionOverlays.push(overlay);
         
-        // Positionner l'overlay en utilisant une approche plus simple
         updatePixelOverlaySimple(overlay, x, y);
     };
 
     const updatePixelOverlaySimple = (overlay, x, y) => {
-        // Créer une position fictive pour tester si le pixel est visible
         const testScreenPos = {x: cvs.offsetLeft + cvs.width/2, y: cvs.offsetTop + cvs.height/2};
         const testCanvasPos = glWindow.click(testScreenPos);
         
@@ -305,22 +320,18 @@ const GUI = (cvs, glWindow, place) => {
             return;
         }
         
-        // Calculer la position relative du pixel par rapport au centre
         const centerX = testCanvasPos.x;
         const centerY = testCanvasPos.y;
         
         const zoom = glWindow.getZoom();
         const pixelSize = Math.max(2, zoom);
         
-        // Position relative par rapport au centre de l'écran
         const relativeX = (x - centerX) * zoom;
         const relativeY = (y - centerY) * zoom;
         
-        // Position absolue sur l'écran
         const screenX = cvs.offsetLeft + cvs.width/2 + relativeX;
         const screenY = cvs.offsetTop + cvs.height/2 + relativeY;
         
-        // Vérifier si c'est dans les limites visibles
         if (screenX < cvs.offsetLeft - pixelSize || screenX > cvs.offsetLeft + cvs.width + pixelSize ||
             screenY < cvs.offsetTop - pixelSize || screenY > cvs.offsetTop + cvs.height + pixelSize) {
             overlay.style.display = 'none';
@@ -380,43 +391,92 @@ const GUI = (cvs, glWindow, place) => {
             maxY = Math.max(maxY, y);
         });
 
-        const selectionData = {
+        currentSelectionData = {
             timestamp: new Date().toISOString(),
             bounds: { minX, maxX, minY, maxY },
             pixels: pixelData
         };
 
-        saveSelectionToFile(selectionData);
-        cancelSelection();
-        console.log(`Zone sauvegardée: ${pixelData.length} pixels`);
+        if (hasModal) {
+            showNamingModal();
+        } else {
+            const name = prompt("Nom de la sélection:", "Ma sélection");
+            const description = prompt("Description (optionnelle):", "");
+            
+            if (name) {
+                saveDirectSelection(name.trim(), description ? description.trim() : "");
+            } else {
+                cancelSelection();
+            }
+        }
     };
 
-    const saveSelectionToFile = async (data) => {
+    const saveDirectSelection = async (name, description) => {
+        const selectionData = {
+            ...currentSelectionData,
+            name: name,
+            description: description
+        };
+
         try {
             const response = await fetch('/selections', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(data)
+                body: JSON.stringify(selectionData)
             });
             
             if (response.ok) {
                 const result = await response.json();
-                console.log(`Sélection sauvegardée avec l'ID: ${result.id}`);
+                console.log(`Sélection "${name}" sauvegardée avec l'ID: ${result.id}`);
+                await loadSelections();
+                cancelSelection();
+                console.log(`Zone "${name}" sauvegardée: ${selectionData.pixels.length} pixels`);
             } else {
                 console.error('Erreur lors de la sauvegarde:', response.statusText);
+                alert('Erreur lors de la sauvegarde');
             }
         } catch (error) {
             console.error('Erreur réseau:', error);
+            alert('Erreur réseau lors de la sauvegarde');
         }
     };
 
-    const getAllSelections = async () => {
+    const showNamingModal = () => {
+        if (!hasModal) return;
+        modalName.value = '';
+        modalDescription.value = '';
+        modal.style.display = 'flex';
+        modalName.focus();
+    };
+
+    const hideNamingModal = () => {
+        if (!hasModal) return;
+        modal.style.display = 'none';
+        currentSelectionData = null;
+    };
+
+    const saveNamedSelection = async () => {
+        if (!hasModal) return;
+        
+        const name = modalName.value.trim();
+        if (!name) {
+            alert('Veuillez saisir un nom pour la sélection');
+            return;
+        }
+
+        await saveDirectSelection(name, modalDescription.value.trim());
+        hideNamingModal();
+    };
+
+    const loadSelections = async () => {
         try {
             const response = await fetch('/selections');
             if (response.ok) {
-                return await response.json();
+                const selections = await response.json();
+                updateDropdown(selections);
+                return selections;
             }
             return [];
         } catch (error) {
@@ -425,18 +485,190 @@ const GUI = (cvs, glWindow, place) => {
         }
     };
 
+    const loadSelection = (selection) => {
+        removeAllSelectionOverlays();
+        selectedPixels.clear();
+        
+        selection.pixels.forEach(pixel => {
+            const pixelKey = `${pixel.x},${pixel.y}`;
+            selectedPixels.add(pixelKey);
+            drawTemporaryPixelBorder(pixel.x, pixel.y);
+        });
+        
+        console.log(`Sélection "${selection.name}" visualisée: ${selection.pixels.length} pixels`);
+    };
+
+    const deleteSelection = async (id) => {
+        if (!confirm('Êtes-vous sûr de vouloir supprimer cette sélection ?')) {
+            return;
+        }
+
+        console.log(`Tentative de suppression de la sélection: ${id}`);
+
+        try {
+            const response = await fetch(`/selections?id=${id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            console.log(`Réponse du serveur: ${response.status} ${response.statusText}`);
+            
+            if (response.ok) {
+                const result = await response.json();
+                console.log(`Sélection supprimée avec succès:`, result);
+                
+                await loadSelections();
+            } else {
+                const errorText = await response.text();
+                console.error('Erreur lors de la suppression:', response.status, errorText);
+                alert(`Erreur lors de la suppression: ${response.status} - ${errorText}`);
+            }
+        } catch (error) {
+            console.error('Erreur réseau lors de la suppression:', error);
+            alert('Erreur réseau lors de la suppression');
+        }
+    };
+
+    // Ajouter quelques logs dans updateDropdown pour débugger
+    const updateDropdown = (selections) => {
+        const dropdown = document.getElementById('atlas-dropdown');
+        if (!dropdown) {
+            console.error('Dropdown atlas-dropdown non trouvé');
+            return;
+        }
+        
+        console.log(`Mise à jour du dropdown avec ${selections.length} sélections`);
+        
+        dropdown.innerHTML = '';
+        
+        // Empêcher les interactions avec le canvas sur le dropdown, SAUF wheel
+        preventCanvasInteraction(dropdown);
+        
+        // Gérer spécifiquement le wheel pour permettre le scroll dans le dropdown
+        dropdown.addEventListener('wheel', (e) => {
+            // Ne pas propager SEULEMENT si on peut scroller dans le dropdown
+            const canScrollUp = dropdown.scrollTop > 0;
+            const canScrollDown = dropdown.scrollTop < (dropdown.scrollHeight - dropdown.clientHeight);
+            
+            if ((e.deltaY < 0 && canScrollUp) || (e.deltaY > 0 && canScrollDown)) {
+                e.stopPropagation();
+            }
+        }, true);
+
+        if (selections.length === 0) {
+            const emptyItem = document.createElement('div');
+            emptyItem.className = 'dropdown-item';
+            emptyItem.innerHTML = '<span style="color: #888;">Aucune sélection</span>';
+            dropdown.appendChild(emptyItem);
+            return;
+        }
+
+        selections.forEach(selection => {
+            console.log(`Ajout de la sélection: ${selection.name} (ID: ${selection.id})`);
+            
+            const item = document.createElement('div');
+            item.className = 'dropdown-item';
+            
+            // Empêcher les interactions canvas sur chaque item
+            preventCanvasInteraction(item);
+            
+            const info = document.createElement('div');
+            info.className = 'dropdown-item-info';
+            
+            const name = document.createElement('div');
+            name.className = 'dropdown-item-name';
+            name.textContent = selection.name;
+            
+            const description = document.createElement('div');
+            description.className = 'dropdown-item-description';
+            description.textContent = selection.description || `${selection.pixels.length} pixels`;
+            
+            info.appendChild(name);
+            info.appendChild(description);
+            
+            const actions = document.createElement('div');
+            actions.className = 'dropdown-item-actions';
+            
+            // Bouton œil pour visualiser la sélection
+            const viewBtn = document.createElement('button');
+            viewBtn.className = 'dropdown-action-btn';
+            viewBtn.textContent = '👁';
+            viewBtn.title = 'Visualiser la sélection';
+            viewBtn.onclick = (e) => {
+                e.stopPropagation();
+                loadSelection(selection);
+                dropdown.classList.remove('show');
+            };
+            
+            // Bouton supprimer avec plus de logs
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'dropdown-action-btn delete-btn';
+            deleteBtn.textContent = '×';
+            deleteBtn.title = 'Supprimer la sélection';
+            deleteBtn.onclick = async (e) => {
+                console.log(`Clic sur supprimer pour la sélection: ${selection.id}`);
+                e.stopPropagation();
+                await deleteSelection(selection.id);
+            };
+            
+            // Empêcher les interactions canvas sur les boutons
+            preventCanvasInteraction(viewBtn);
+            preventCanvasInteraction(deleteBtn);
+            
+            actions.appendChild(viewBtn);
+            actions.appendChild(deleteBtn);
+            
+            item.appendChild(info);
+            item.appendChild(actions);
+            dropdown.appendChild(item);
+        });
+    };
+
+    if (hasModal) {
+        modalCancel.addEventListener('click', () => {
+            hideNamingModal();
+            cancelSelection();
+        });
+
+        modalSave.addEventListener('click', saveNamedSelection);
+
+        modalName.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                if (modalDescription.value.trim() === '') {
+                    modalDescription.focus();
+                } else {
+                    saveNamedSelection();
+                }
+            }
+        });
+
+        modalDescription.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                saveNamedSelection();
+            }
+        });
+
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                hideNamingModal();
+                cancelSelection();
+            }
+        });
+    }
+
     const showValidateButton = () => {
-        document.getElementById('atlas-validate').style.display = 'block';
+        const validateBtn = document.getElementById('atlas-validate');
+        if (validateBtn) validateBtn.style.display = 'block';
     };
 
     const hideValidateButton = () => {
-        document.getElementById('atlas-validate').style.display = 'none';
+        const validateBtn = document.getElementById('atlas-validate');
+        if (validateBtn) validateBtn.style.display = 'none';
     };
 
-    // ***************************************************
-    // ***************************************************
-    // Helper Functions
-    //
     const setColor = (c) => {
         let hex = c.replace(/[^A-Fa-f0-9]/g, "").toUpperCase();
         hex = hex.substring(0, 6);
@@ -495,39 +727,57 @@ const GUI = (cvs, glWindow, place) => {
         }
     }
 
-    // Event listeners pour les boutons Atlas
-    document.getElementById('atlas-button').addEventListener('click', function() {
-        const dropdown = document.getElementById('atlas-dropdown');
-        dropdown.classList.toggle('show');
-    });
+    const atlasButton = document.getElementById('atlas-button');
+    const atlasSelect = document.getElementById('atlas-select');
+    const atlasValidate = document.getElementById('atlas-validate');
 
-    document.getElementById('atlas-select').addEventListener('click', function() {
-        startSelection();
-    });
+    if (atlasButton) {
+        atlasButton.addEventListener('click', function() {
+            const dropdown = document.getElementById('atlas-dropdown');
+            dropdown.classList.toggle('show');
+            
+            // Charger les sélections quand on ouvre le dropdown
+            if (dropdown.classList.contains('show')) {
+                loadSelections();
+            }
+        });
+    }
 
-    document.getElementById('atlas-validate').addEventListener('click', function() {
-        captureSelectedArea();
-    });
+    if (atlasSelect) {
+        atlasSelect.addEventListener('click', function() {
+            startSelection();
+        });
+    }
+
+    if (atlasValidate) {
+        atlasValidate.addEventListener('click', function() {
+            captureSelectedArea();
+        });
+    }
 
     document.addEventListener('click', function(event) {
         const atlas = document.getElementById('atlas');
         const dropdown = document.getElementById('atlas-dropdown');
         
-        if (!atlas.contains(event.target)) {
-            dropdown.classList.remove('show');
+        if (atlas && dropdown) {
+            // Si on clique dans le dropdown, ne pas le fermer
+            if (dropdown.contains(event.target)) {
+                return;
+            }
+            
+            // Si on clique en dehors de l'atlas, fermer le dropdown
+            if (!atlas.contains(event.target)) {
+                dropdown.classList.remove('show');
+            }
         }
     });
 
-    document.querySelectorAll('.dropdown-item').forEach(item => {
-        item.addEventListener('click', function() {
-            console.log('Cliqué sur:', this.textContent);
-            document.getElementById('atlas-dropdown').classList.remove('show');
-        });
-    });
+    setTimeout(() => {
+        loadSelections();
+    }, 100);
 
-    // Exposer les fonctions de sélection pour les tests
     window.placeSelections = {
-        getAll: getAllSelections,
+        getAll: loadSelections,
         cancel: cancelSelection
     };
 

@@ -14,7 +14,6 @@ import (
 	"os"
 	"path"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -47,10 +46,12 @@ type Server struct {
 }
 
 type Selection struct {
-	ID        string    `json:"id"`
-	Timestamp string    `json:"timestamp"`
-	Bounds    Bounds    `json:"bounds"`
-	Pixels    []Pixel   `json:"pixels"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Timestamp   string    `json:"timestamp"`
+	Bounds      Bounds    `json:"bounds"`
+	Pixels      []Pixel   `json:"pixels"`
 }
 
 type Bounds struct {
@@ -86,8 +87,10 @@ func NewServer(img draw.Image, count int) *Server {
 }
 
 func (sv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+    log.WithField("path", req.URL.Path).WithField("method", req.Method).Debug("Request received")
+    
     switch {
-    case strings.HasPrefix(req.URL.Path, "/selections"):
+    case path.Base(req.URL.Path) == "selections":
         sv.handleSelections(w, req)
     case path.Base(req.URL.Path) == "place.png":
         sv.HandleGetImage(w, req)
@@ -96,6 +99,7 @@ func (sv *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
     case path.Base(req.URL.Path) == "ws":
         sv.HandleSocket(w, req)
     default:
+        log.WithField("path", req.URL.Path).Warning("Route not found")
         http.NotFound(w, req)
     }
 }
@@ -289,25 +293,36 @@ func (sv *Server) setPixel(x, y int, c color.Color) bool {
 }
 
 func (sv *Server) handleSelections(w http.ResponseWriter, r *http.Request) {
-    log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Trace("Selection API requested")
+    log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").WithField("path", r.URL.Path).WithField("method", r.Method).Debug("Selection API requested")
+    
     w.Header().Set("Content-Type", "application/json")
     w.Header().Set("Access-Control-Allow-Origin", "*")
+    w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+    w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
+    // Récupérer l'ID depuis les paramètres de requête (comme stat le fait)
+    id := r.URL.Query().Get("id")
+    action := r.URL.Query().Get("action")
+    
     switch r.Method {
     case "GET":
-        if r.URL.Path == "/selections" {
-            sv.getAllSelections(w, r)
+        if id != "" {
+            sv.getSelection(w, r, id)
         } else {
-            sv.getSelection(w, r)
+            sv.getAllSelections(w, r)
         }
     case "POST":
         sv.saveSelection(w, r)
     case "DELETE":
-        if r.URL.Path == "/selections" {
+        if action == "clear" {
             sv.clearAllSelections(w, r)
+        } else if id != "" {
+            sv.deleteSelectionById(w, r, id)
         } else {
-            sv.deleteSelection(w, r)
+            http.Error(w, "ID requis pour la suppression", http.StatusBadRequest)
         }
+    case "OPTIONS":
+        w.WriteHeader(http.StatusOK)
     default:
         http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
     }
@@ -343,8 +358,7 @@ func (sv *Server) getAllSelections(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(selections)
 }
 
-func (sv *Server) getSelection(w http.ResponseWriter, r *http.Request) {
-    id := strings.TrimPrefix(r.URL.Path, "/selections/")
+func (sv *Server) getSelection(w http.ResponseWriter, r *http.Request, id string) {
     selections := sv.loadSelections()
 
     for _, selection := range selections {
@@ -359,9 +373,16 @@ func (sv *Server) getSelection(w http.ResponseWriter, r *http.Request) {
     http.Error(w, "Sélection non trouvée", http.StatusNotFound)
 }
 
-func (sv *Server) deleteSelection(w http.ResponseWriter, r *http.Request) {
-    id := strings.TrimPrefix(r.URL.Path, "/selections/")
+func (sv *Server) deleteSelectionById(w http.ResponseWriter, r *http.Request, id string) {
+    if id == "" {
+        log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Warning("ID de sélection vide")
+        http.Error(w, "ID de sélection requis", http.StatusBadRequest)
+        return
+    }
+    
     selections := sv.loadSelections()
+    log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Debug("Tentative de suppression de:", id)
+    log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").Debug("Nombre de sélections:", len(selections))
 
     for i, selection := range selections {
         if selection.ID == id {
@@ -372,7 +393,10 @@ func (sv *Server) deleteSelection(w http.ResponseWriter, r *http.Request) {
                 return
             }
             log.WithField("ip", r.RemoteAddr).WithField("endpoint", "Selections").WithField("id", id).Info("Sélection supprimée")
-            w.WriteHeader(http.StatusOK)
+            
+            response := map[string]string{"message": "Sélection supprimée", "id": id}
+            w.Header().Set("Content-Type", "application/json")
+            json.NewEncoder(w).Encode(response)
             return
         }
     }

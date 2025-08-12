@@ -27,9 +27,7 @@
 					✓
 				</button>
 				<div id="atlas-dropdown" class="dropdown-menu">
-					<div class="dropdown-item">Option 1</div>
-					<div class="dropdown-item">Option 2</div>
-					<div class="dropdown-item">Option 3</div>
+					<!-- Le contenu sera généré dynamiquement -->
 				</div>
 			</div>
 		<div id="zoom-wrapper">
@@ -47,11 +45,31 @@
 		</div>
 	</div>
 	<p id="avec-amour">Fait avec <span style="color: #aa5757;">❤</span> par Evan et Tiago</p>
-	<script src="main.js"></script>
-	<script src="place.js"></script>
-	<script src="glwindow.js"></script>
-	<script>
-		main();
-	</script>
+	
+	<!-- Modal pour nommer la sélection -->
+	<div id="selection-modal" class="modal" style="display: none;">
+		<div class="modal-content">
+			<h3>Nommer votre sélection</h3>
+			<div class="modal-field">
+				<label for="selection-name">Nom:</label>
+				<input type="text" id="selection-name" placeholder="Ex: Logo principal" maxlength="50">
+			</div>
+			<div class="modal-field">
+				<label for="selection-description">Description:</label>
+				<textarea id="selection-description" placeholder="Description optionnelle..." maxlength="200"></textarea>
+			</div>
+			<div class="modal-buttons">
+				<button id="modal-cancel">Annuler</button>
+				<button id="modal-save">Sauvegarder</button>
+			</div>
+		</div>
+	</div>
+
+    <script src="main.js"></script>
+    <script src="place.js"></script>
+    <script src="glwindow.js"></script>
+    <script>
+        main();
+    </script>
 </body>
 </html>
