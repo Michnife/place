@@ -10,26 +10,12 @@ function main() {
 }
 
 const preventCanvasInteraction = (element) => {
-    // Seuls les événements qui interfèrent avec le canvas doivent être stoppés
-    element.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-    });
-    element.addEventListener('mousemove', (e) => {
-        e.stopPropagation();
-    });
-    element.addEventListener('mouseup', (e) => {
-        e.stopPropagation();
-    });
-    // Ne pas bloquer wheel pour permettre le scroll dans le dropdown
-    element.addEventListener('touchstart', (e) => {
-        e.stopPropagation();
-    });
-    element.addEventListener('touchmove', (e) => {
-        e.stopPropagation();
-    });
-    element.addEventListener('touchend', (e) => {
-        e.stopPropagation();
-    });
+    element.addEventListener('mousedown', (e) => { e.stopPropagation(); });
+    element.addEventListener('mousemove', (e) => { e.stopPropagation(); });
+    element.addEventListener('mouseup', (e) => { e.stopPropagation(); });
+    element.addEventListener('touchstart', (e) => { e.stopPropagation(); });
+    element.addEventListener('touchmove', (e) => { e.stopPropagation(); });
+    element.addEventListener('touchend', (e) => { e.stopPropagation(); });
 };
 
 const GUI = (cvs, glWindow, place) => {
@@ -112,13 +98,20 @@ const GUI = (cvs, glWindow, place) => {
 
     cvs.addEventListener("mousedown", (ev) => {
         const pos = {x: ev.clientX, y: ev.clientY};
-        
+
         if (isSelecting) {
-            isSelectionDragging = true;
-            selectPixelAtPosition(pos);
-            return;
+            if (ev.button === 2) { // right click selects
+                isSelectionDragging = true;
+                selectPixelAtPosition(pos);
+                return;
+            }
+            if (ev.button === 0) { // left click pans
+                dragdown = true;
+                lastMovePos = pos;
+                return;
+            }
         }
-        
+
         switch (ev.button) {
             case 0:
                 dragdown = true;
@@ -531,7 +524,6 @@ const GUI = (cvs, glWindow, place) => {
         }
     };
 
-    // Ajouter quelques logs dans updateDropdown pour débugger
     const updateDropdown = (selections) => {
         const dropdown = document.getElementById('atlas-dropdown');
         if (!dropdown) {
@@ -543,12 +535,8 @@ const GUI = (cvs, glWindow, place) => {
         
         dropdown.innerHTML = '';
         
-        // Empêcher les interactions avec le canvas sur le dropdown, SAUF wheel
         preventCanvasInteraction(dropdown);
-        
-        // Gérer spécifiquement le wheel pour permettre le scroll dans le dropdown
         dropdown.addEventListener('wheel', (e) => {
-            // Ne pas propager SEULEMENT si on peut scroller dans le dropdown
             const canScrollUp = dropdown.scrollTop > 0;
             const canScrollDown = dropdown.scrollTop < (dropdown.scrollHeight - dropdown.clientHeight);
             
@@ -571,7 +559,6 @@ const GUI = (cvs, glWindow, place) => {
             const item = document.createElement('div');
             item.className = 'dropdown-item';
             
-            // Empêcher les interactions canvas sur chaque item
             preventCanvasInteraction(item);
             
             const info = document.createElement('div');
@@ -591,7 +578,6 @@ const GUI = (cvs, glWindow, place) => {
             const actions = document.createElement('div');
             actions.className = 'dropdown-item-actions';
             
-            // Bouton œil pour visualiser la sélection
             const viewBtn = document.createElement('button');
             viewBtn.className = 'dropdown-action-btn';
             viewBtn.textContent = '👁';
@@ -602,7 +588,6 @@ const GUI = (cvs, glWindow, place) => {
                 dropdown.classList.remove('show');
             };
             
-            // Bouton supprimer avec plus de logs
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'dropdown-action-btn delete-btn';
             deleteBtn.textContent = '×';
@@ -613,7 +598,6 @@ const GUI = (cvs, glWindow, place) => {
                 await deleteSelection(selection.id);
             };
             
-            // Empêcher les interactions canvas sur les boutons
             preventCanvasInteraction(viewBtn);
             preventCanvasInteraction(deleteBtn);
             
@@ -736,7 +720,6 @@ const GUI = (cvs, glWindow, place) => {
             const dropdown = document.getElementById('atlas-dropdown');
             dropdown.classList.toggle('show');
             
-            // Charger les sélections quand on ouvre le dropdown
             if (dropdown.classList.contains('show')) {
                 loadSelections();
             }
@@ -760,12 +743,9 @@ const GUI = (cvs, glWindow, place) => {
         const dropdown = document.getElementById('atlas-dropdown');
         
         if (atlas && dropdown) {
-            // Si on clique dans le dropdown, ne pas le fermer
             if (dropdown.contains(event.target)) {
                 return;
             }
-            
-            // Si on clique en dehors de l'atlas, fermer le dropdown
             if (!atlas.contains(event.target)) {
                 dropdown.classList.remove('show');
             }
